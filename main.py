@@ -10,6 +10,7 @@ import pandas as pd
 from PIL import Image, ImageTk
 
 from siamese_network import Siamese
+from utils import iou, load_known_faces, setup_logger
 
 
 class AttendanceApp:
@@ -20,6 +21,11 @@ class AttendanceApp:
   known_dir = data_dir / "known_faces"
 
   def __init__(self, root, args):
+    self.logger = setup_logger(10 if args.verbose else 30)
+    self.setup_gui(root)
+    self.setup_backend(args)
+
+  def setup_gui(self, root):
     self.root = root
     self.root.title("Attendance Recorder")
     self.root.geometry("700x600")
@@ -29,7 +35,6 @@ class AttendanceApp:
 
     self.video_label = ttk.Label(root)
     self.video_label.grid(row=0, column=1, padx=0, pady=0, sticky='')
-    self.display_frame(np.zeros((720, 720, 3)).astype(np.uint8))
 
     self.start_button = ttk.Button(self.left_frame, text="Start Recording", command=self.start_recording)
     self.start_button.grid(row=0, column=0, padx=0, pady=0)
@@ -37,43 +42,56 @@ class AttendanceApp:
     self.stop_button = ttk.Button(self.left_frame, text="Stop Recording", command=self.stop_recording)
     self.stop_button.grid(row=1, column=0, padx=0, pady=0)
 
+    self.display_frame(np.zeros((720, 720, 3)).astype(np.uint8))
+
+  def setup_backend(self, args):
     self.cap = None
     self.timer = None
+
+    if not (self.assets_dir/"overlay.png").exists():
+      self.logger.error("Overlay image not found.")
+      raise FileNotFoundError("Overlay image not found.")
+
     self.overlay = cv2.imread(str(self.assets_dir/"overlay.png"), cv2.IMREAD_UNCHANGED)
     self.font = cv2.FONT_HERSHEY_SIMPLEX
 
-    # Database setup
-    self.load_database()
-
-    # Initialize face recognizer
     self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt.xml")
+    if self.face_cascade.empty():
+      self.logger.error("Failed to load face cascade classifier.")
+      raise FileNotFoundError("Face cascade classifier not found.")
+
     self.face_recognizer = Siamese()
     self.threshold = args.threshold
     if not args.weight:
       weights = [x for x in self.weights_dir.iterdir() if x.suffix == ".h5"]
-      assert len(weights) > 0
-      args.weight = weights[0]
-    self.face_recognizer.set_weight(args.weight)
+      if len(weights) == 0:
+        self.logger.error("No weight files found in the weights directory.")
+        raise FileNotFoundError("No weight files found in the weights directory.")
+      weight = weights[0]
+    else:
+      weight = self.weights_dir / args.weight
 
-    # Load known faces
-    self.load_known_faces()
+    if not weight.exists():
+      self.logger.error("Weight file not found.")
+      raise FileNotFoundError(f"Weight file not found: {weight}")
+
+    self.face_recognizer.set_weight(weight)
+    self.logger.info(f"Loaded weight: {weight}")
+
+    self.load_database()
+    self.known_people, self.labels = load_known_faces(self.known_dir)
+    self.nb_known_people = len(self.known_people)
+    self.logger.info(f"{self.nb_known_people} people: {self.labels}")
 
   def load_database(self):
     today = datetime.now().date().isoformat()
     self.db_file = self.records_dir / f"{today}.csv"
-    self.attendance_df = pd.read_csv(self.db_file) if self.db_file.exists() else pd.DataFrame(columns=['name', 'timestamp'])
-
-  def load_known_faces(self):
-    self.labels = []
-    self.known_people = []
-    for person_file in self.known_dir.iterdir():
-      if not person_file.is_file():
-        continue
-      if person_file.suffix.casefold() != ".jpg":
-        continue
-      self.labels.append(".".join(person_file.name.split('.')[:-1]))
-      self.known_people.append(cv2.imread(str(person_file)))
-    self.nb_known_people = len(self.known_people)
+    if self.db_file.exists():
+      self.attendance_df = pd.read_csv(self.db_file)
+      self.logger.info("Loaded existing db for the day")
+    else:
+      self.attendance_df = pd.DataFrame(columns=['name', 'timestamp'])
+      self.logger.info("Created a new db for the day")
 
   def start_recording(self):
     self.detected = False
@@ -87,6 +105,7 @@ class AttendanceApp:
     self.width = self.height = self.frame_height
     self.detection_box = (self.width // np.array([3.6, 14.4, 2.33, 1.8])).astype(int) #xywh
     self.update_timer()
+    self.logger.info(f"fw: {self.frame_width}, fh: {self.frame_height}")
 
   def stop_recording(self):
     if self.timer is not None:
@@ -113,10 +132,10 @@ class AttendanceApp:
     return faces
 
   def recognize_face(self, frame):
-    return self.face_recognizer.predict(
-      self.get_input(frame),
-      preprocess=True,
-      batch_size=min(self.nb_known_people, 8))
+    inputs = self.get_input(frame)
+    result = self.face_recognizer.predict(inputs, preprocess=True, batch_size=min(self.nb_known_people, 8))
+    confidence, label = result.max(), result.argmax()
+    return confidence, label
 
   def put_bbox(self, frame, face):
     x, y, w, h = face
@@ -139,6 +158,14 @@ class AttendanceApp:
     self.display_frame(frame)
     self.update_timer()
 
+  def post_detection(self, frame):
+    if self.frame_count == 0:
+      self.logger.info("Subject identified, stopping camera feed.")
+    self.post_update(frame)
+    self.frame_count += 1
+    if self.frame_count > 20:
+      self.stop_recording()
+
   def update_frame(self):
     ret, frame = self.cap.read()
     if not ret:
@@ -148,12 +175,12 @@ class AttendanceApp:
     offset = (self.frame_width-self.width)//2
     frame = frame[:, offset:self.width+offset, :]
     if self.detected:
-      self.post_update(frame)
-      self.frame_count += 1
-      if self.frame_count > 20:
-        self.stop_recording()
+      self.post_detection(frame)
       return
 
+    self.process_frame(frame)
+
+  def process_frame(self, frame):
     self.text = "Align your face"
     img = frame.copy()
     faces = self.detect_faces(img)
@@ -162,55 +189,44 @@ class AttendanceApp:
       return
 
     face = faces[0]
-    face_iou = iou(xywh2xyxy(self.detection_box), xywh2xyxy(face))
+    face_iou = iou(self.detection_box, face)
     self.text = "Align your face properly"
+    self.logger.info(f"IoU: {face_iou:.4f}")
     if face_iou < 0.7:
       self.post_update(frame)
       return
 
     self.put_bbox(frame, face)
-    self.text = "Who are you?"
-    result = self.recognize_face(img)
-    confidence, label = result.max(), result.argmax()
+    confidence, label = self.recognize_face(img)
     if confidence > self.threshold:
       name = self.labels[label]
       self.detected = True
       self.record_attendance(name)
       self.text = f"Welcome {name}. Your attendance has been recorded"
+    else:
+      self.text = f"Who are you?"
+
+    self.logger.info(f"Label: {self.labels[label]}, Confidence: {confidence:.4f}")
     self.post_update(frame)
 
   def record_attendance(self, name):
     new_record = {'name': name, 'timestamp': pd.Timestamp.now()}
     self.attendance_df.loc[len(self.attendance_df)] = new_record
     self.attendance_df.to_csv(self.db_file, index=False)
+    self.logger.info("New record saved")
 
 
-def xywh2xyxy(box):
-  b = box.copy()
-  if len(b.shape) == 1:
-    b[2] += b[0]
-    b[3] += b[1]
-  elif len(b.shape) == 2:
-    b[:, 2] += b[:, 0]
-    b[:, 3] += b[:, 1]
-  return b
-
-
-def iou(boxA, boxB):
-  boxes = np.vstack([boxA, boxB])
-  xA, yA = boxes[:, :2].max(axis=0)
-  xB, yB = boxes[:, 2:].min(axis=0)
-  inter_area = max(0, xB-xA+1) * max(0, yB-yA+1)
-  boxes_area = (boxes[:, 2]-boxes[:, 0]+1) * (boxes[:, 3]-boxes[:, 1]+1)
-  return inter_area / (boxes_area.sum() - inter_area)
-
-
-if __name__ == "__main__":
+def main():
   parser = argparse.ArgumentParser(description="Attendance Recorder using Face Recognition.")
   parser.add_argument("-w", "--weight", type=str, default="", help="Filename of the weight file to be used for the Siamese network. This file must be placed inside the 'data/weights' directory. If not specified, the first '.h5' file found in the directory will be used.")
   parser.add_argument("-t", "--threshold", type=float, default=0.5, help="Threshold for face recognition confidence. If the recognition confidence exceeds this threshold, the face is considered recognized. Default value is 0.5.")
+  parser.add_argument("-v", "--verbose", action="store_true", help="Verbose command line output.")
   args = parser.parse_args()
 
   root = tk.Tk()
   app = AttendanceApp(root, args)
   root.mainloop()
+
+
+if __name__ == "__main__":
+  main()
