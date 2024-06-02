@@ -77,6 +77,8 @@ class AttendanceApp:
 
     self.face_recognizer.set_weight(weight)
     self.logger.info(f"Loaded weight: {weight}")
+    self.min_buffer_size = args.min_buffer_size
+    self.max_buffer_size = 2 * self.min_buffer_size
 
     self.load_database()
     self.known_people, self.labels = load_known_faces(self.known_dir)
@@ -94,7 +96,9 @@ class AttendanceApp:
       self.logger.info("Created a new db for the day")
 
   def start_recording(self):
-    self.detected = False
+    self.prediction_buffer = []
+    self.is_detected = False
+    self.is_failed = False
     self.text = ""
     self.frame_count = 0
     self.cap = cv2.VideoCapture(0)
@@ -137,6 +141,14 @@ class AttendanceApp:
     confidence, label = result.max(), result.argmax()
     return confidence, label
 
+  def smooth_predictions(self):
+    if not self.prediction_buffer:
+      return 0, -1
+    confs, lbls = zip(*self.prediction_buffer)
+    avg_conf = np.mean(confs)
+    lbl = max(set(lbls), key=lbls.count)
+    return avg_conf, lbl
+
   def put_bbox(self, frame, face):
     x, y, w, h = face
     cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 1)
@@ -158,12 +170,12 @@ class AttendanceApp:
     self.display_frame(frame)
     self.update_timer()
 
-  def post_detection(self, frame):
+  def post_detection(self, frame, failed=False):
     if self.frame_count == 0:
-      self.logger.info("Subject identified, stopping camera feed.")
+      self.logger.info(f"Subject{' failed to ' if failed else ' '}identified, stopping camera feed.")
     self.post_update(frame)
     self.frame_count += 1
-    if self.frame_count > 20:
+    if self.frame_count > 10:
       self.stop_recording()
 
   def update_frame(self):
@@ -174,8 +186,8 @@ class AttendanceApp:
 
     offset = (self.frame_width-self.width)//2
     frame = frame[:, offset:self.width+offset, :]
-    if self.detected:
-      self.post_detection(frame)
+    if self.is_detected:
+      self.post_detection(frame, failed=self.is_failed)
       return
 
     self.process_frame(frame)
@@ -196,17 +208,31 @@ class AttendanceApp:
       self.post_update(frame)
       return
 
+    self.text = "Recognizing face..."
     self.put_bbox(frame, face)
+
     confidence, label = self.recognize_face(img)
-    if confidence > self.threshold:
-      name = self.labels[label]
-      self.detected = True
+    self.prediction_buffer.append((confidence, label))
+    self.logger.info(f"Buffer size: {len(self.prediction_buffer)}")
+    if len(self.prediction_buffer) < self.min_buffer_size:
+      self.post_update(frame)
+      return
+
+    if len(self.prediction_buffer) == self.max_buffer_size:
+      self.is_detected = True
+      self.is_failed = True
+      self.text = f"Recognition failed, please try again"
+      self.post_update(frame)
+      return
+
+    avg_confidence, most_common_label = self.smooth_predictions()
+    name = self.labels[most_common_label]
+    if avg_confidence > self.threshold:
+      self.is_detected = True
       self.record_attendance(name)
       self.text = f"Welcome {name}. Your attendance has been recorded"
-    else:
-      self.text = f"Who are you?"
 
-    self.logger.info(f"Label: {self.labels[label]}, Confidence: {confidence:.4f}")
+    self.logger.info(f"Label: {name}, Confidence: {avg_confidence:.4f}")
     self.post_update(frame)
 
   def record_attendance(self, name):
@@ -220,6 +246,7 @@ def main():
   parser = argparse.ArgumentParser(description="Attendance Recorder using Face Recognition.")
   parser.add_argument("-w", "--weight", type=str, default="", help="Filename of the weight file to be used for the Siamese network. This file must be placed inside the 'data/weights' directory. If not specified, the first '.h5' file found in the directory will be used.")
   parser.add_argument("-t", "--threshold", type=float, default=0.5, help="Threshold for face recognition confidence. If the recognition confidence exceeds this threshold, the face is considered recognized. Default value is 0.5.")
+  parser.add_argument("-b", "--min-buffer-size", type=int, default=5, help="Minimum buffer size for face recognition. Default value is 10.")
   parser.add_argument("-v", "--verbose", action="store_true", help="Verbose command line output.")
   args = parser.parse_args()
 
