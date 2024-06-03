@@ -14,7 +14,18 @@ from utils import get_weight_file, iou, load_known_faces, setup_logger
 
 
 class FaceRecognizer:
+  """
+  A class for recognizing faces in images using a pre-trained Siamese network.
+  """
   def __init__(self, weight_path, threshold, logger):
+    """
+    Initializes the FaceRecognizer with a given weight path, threshold, and logger.
+
+    Args:
+        weight_path (str): Path to the pre-trained weights for the Siamese network.
+        threshold (float): Threshold for face recognition confidence.
+        logger (Logger): Logger object for logging information.
+    """
     self.logger = logger
     self.threshold = threshold
     self.face_recognizer = Siamese()
@@ -22,6 +33,16 @@ class FaceRecognizer:
     self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt.xml")
 
   def recognize_face(self, known_faces, frame):
+    """
+    Recognizes faces in a given frame and compares them with known faces.
+
+    Args:
+        known_faces (list): List of known faces to compare against.
+        frame (numpy.ndarray): The frame in which to recognize faces.
+
+    Returns:
+        tuple: A tuple containing the maximum confidence score and the label of the recognized face.
+    """
     inputs = [known_faces, [frame] * len(known_faces)]
     result = self.face_recognizer.predict(inputs, preprocess=True, batch_size=min(len(known_faces), 8))
     confidence, label = result.max(), result.argmax()
@@ -29,7 +50,18 @@ class FaceRecognizer:
 
 
 class DatabaseManager:
+  """
+  A class for managing a database of attendance records.
+  """
   def __init__(self, records_dir, known_dir, logger):
+    """
+    Initializes the DatabaseManager with directories for records and known faces, and a logger.
+
+    Args:
+        records_dir (Path): Directory where attendance records are stored.
+        known_dir (Path): Directory where known faces are stored.
+        logger (Logger): Logger object for logging information.
+    """
     self.logger = logger
     self.records_dir = records_dir
     self.known_dir = known_dir
@@ -38,6 +70,9 @@ class DatabaseManager:
     self.nb_known_people = len(self.known_people)
 
   def load_database(self):
+    """
+    Loads the attendance database for the current day. If no database exists, creates a new one.
+    """
     today = datetime.now().date().isoformat()
     self.db_file = self.records_dir / f"{today}.csv"
     if self.db_file.exists():
@@ -48,6 +83,12 @@ class DatabaseManager:
       self.logger.info("Created a new db for the day")
 
   def record_attendance(self, record):
+    """
+    Records attendance by adding a new record to the database and saving it.
+
+    Args:
+        record (dict): Dictionary containing the attendance record with keys 'name' and 'timestamp'.
+    """
     self.attendance_df.loc[len(self.attendance_df)] = record
     self.attendance_df.to_csv(self.db_file, index=False)
     self.logger.info("New record saved")
@@ -56,6 +97,16 @@ class DatabaseManager:
 class UIManager:
   ASSETS_DIR = Path("data/assets")
   def __init__(self, root, face_recognizer, db_manager, logger, min_buffer_size=5):
+    """
+    Initializes the UIManager with the root window, face recognizer, database manager, logger, and buffer sizes.
+
+    Args:
+        root (tk.Tk): The root window for the Tkinter application.
+        face_recognizer (FaceRecognizer): An instance of the FaceRecognizer class.
+        db_manager (DatabaseManager): An instance of the DatabaseManager class.
+        logger (Logger): Logger object for logging information.
+        min_buffer_size (int): Minimum buffer size for smoothing predictions. Default is 5.
+    """
     self.root = root
     self.face_recognizer = face_recognizer
     self.db_manager = db_manager
@@ -65,6 +116,9 @@ class UIManager:
     self.setup_gui()
 
   def setup_gui(self):
+    """
+    Sets up the graphical user interface for the application.
+    """
     self.root.title("Attendance Recorder")
     self.root.geometry("900x640")
     self.root.minsize(width=900, height=640)
@@ -84,6 +138,9 @@ class UIManager:
     self.setup_menu()
 
   def setup_left_frame(self):
+    """
+    Sets up the left frame of the GUI, containing buttons and a table for database records.
+    """
     self.left_frame = ttk.Frame(self.main_frame)
     self.left_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
@@ -114,6 +171,9 @@ class UIManager:
     self.quit_button.pack(pady=5)
 
   def setup_right_frame(self):
+    """
+    Sets up the right frame of the GUI, containing video display.
+    """
     self.right_frame = ttk.Frame(self.main_frame)
     self.right_frame.grid(row=0, column=1, padx=10, pady=0, sticky="nsew")
 
@@ -130,6 +190,9 @@ class UIManager:
     self.display_frame(np.zeros((720, 720, 3)).astype(np.uint8))
 
   def setup_menu(self):
+    """
+    Sets up the menu for the GUI, including settings options.
+    """
     menubar = tk.Menu(self.root)
     self.root.config(menu=menubar)
 
@@ -141,6 +204,9 @@ class UIManager:
     settings_menu.add_command(label="Change Max Buffer Size", command=self.change_max_buffer_size)
 
   def change_threshold(self):
+    """
+    Changes the threshold for face recognition confidence.
+    """
     new_threshold = simpledialog.askfloat("Change Threshold", "Enter new threshold value:",
                                           minvalue=0.0, maxvalue=1.0, initialvalue=self.face_recognizer.threshold)
     if new_threshold is not None:
@@ -148,6 +214,9 @@ class UIManager:
       messagebox.showinfo("Threshold Changed", f"New threshold set to: {new_threshold}")
 
   def change_min_buffer_size(self):
+    """
+    Changes the minimum buffer size for smoothing predictions.
+    """
     new_min_buffer_size = simpledialog.askinteger("Change Min Buffer Size", "Enter new minimum buffer size:",
                                                   minvalue=1, maxvalue=self.max_buffer_size, initialvalue=self.min_buffer_size)
     if new_min_buffer_size is not None:
@@ -155,6 +224,9 @@ class UIManager:
       messagebox.showinfo("Buffer Size Changed", f"New min. buffer size set to: {new_min_buffer_size}")
 
   def change_max_buffer_size(self):
+    """
+    Changes the maximum buffer size for smoothing predictions.
+    """
     new_max_buffer_size = simpledialog.askinteger("Change Max Buffer Size", "Enter new maximum buffer size:",
                                                   minvalue=self.min_buffer_size, maxvalue=100, initialvalue=self.max_buffer_size)
     if new_max_buffer_size is not None:
@@ -162,10 +234,16 @@ class UIManager:
       messagebox.showinfo("Buffer Size Changed", f"New max. buffer size set to: {new_max_buffer_size}")
 
   def update_date_time(self):
+    """
+    Updates the date and time display on the GUI.
+    """
     self.date_time.config(text=f"{datetime.now():%d-%B-%Y  |  %H:%M:%S}")
     self.root.after(1000, self.update_date_time)
 
   def toggle_recording(self):
+    """
+    Toggles the recording state for taking attendance.
+    """
     if self.db_manager.nb_known_people == 0:
       messagebox.showerror("Error", "No registered users found. Please register at least one user before starting taking attendance.")
       return
@@ -182,6 +260,9 @@ class UIManager:
     self.is_recording = not self.is_recording
 
   def toggle_new_user(self):
+    """
+    Toggles the state for adding a new user.
+    """
     self.is_detecting = False
     if self.is_recording:
       self.stop_recording()
@@ -196,6 +277,9 @@ class UIManager:
     self.is_recording = not self.is_recording
 
   def start_recording(self):
+    """
+    Starts the video recording for face recognition.
+    """
     self.prediction_buffer = []
     self.image = None
     self.is_detected = False
@@ -213,6 +297,9 @@ class UIManager:
     self.logger.info(f"fw: {self.frame_width}, fh: {self.frame_height}")
 
   def stop_recording(self):
+    """
+    Stops the video recording.
+    """
     if self.timer is not None:
       self.root.after_cancel(self.timer)
     if self.cap is not None:
@@ -221,6 +308,9 @@ class UIManager:
     self.update_text("")
 
   def take_image(self):
+    """
+    Takes an image for registering a new user.
+    """
     self.toggle_new_user()
     image = self.image.copy()
     while True:
@@ -241,27 +331,39 @@ class UIManager:
     self.status_bar.config(text=f"Registered Users: {self.db_manager.nb_known_people}")
     messagebox.showinfo("Success", f"New face for {name} successfully recorded.")
 
-  def get_input(self, image):
-    return [self.db_manager.known_people, [image] * len(self.db_manager.known_people)]
-
   def update_timer(self):
+    """
+    Updates the timer for frame update.
+    """
     self.timer = self.root.after(30, self.update_frame)
 
   def display_frame(self, frame):
+    """
+    Displays a frame in the GUI.
+    """
     image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).resize((500, 500))
     imgtk = ImageTk.PhotoImage(image=image)
     self.video_label.imgtk = imgtk
     self.video_label.config(image=imgtk)
 
   def detect_faces(self, frame):
+    """
+    Detects faces in a frame.
+    """
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = self.face_recognizer.face_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
     return faces
 
   def recognize_face(self, frame):
+    """
+    Recognizes faces in a frame.
+    """
     return self.face_recognizer.recognize_face(self.db_manager.known_people, frame)
 
   def smooth_predictions(self):
+    """
+    Smoothes the predictions for face recognition.
+    """
     if not self.prediction_buffer:
       return 0, -1
     confs, lbls = zip(*self.prediction_buffer)
@@ -270,13 +372,22 @@ class UIManager:
     return avg_conf, lbl
 
   def put_bbox(self, frame, face):
+    """
+    Draws bounding boxes around detected faces.
+    """
     x, y, w, h = face
     cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 1)
 
   def update_text(self, text):
+    """
+    Updates the text displayed in the GUI.
+    """
     self.text_label.config(text=text)
 
   def add_overlay(self, frame):
+    """
+    Adds an overlay to the frame.
+    """
     overlay = cv2.resize(self.overlay, (self.height, self.width))
     alpha = overlay[:, :, 3] / 255
     colors = overlay[:, :, :3]
@@ -284,12 +395,18 @@ class UIManager:
     frame[:] = frame[:] * (1 - alpha_mask) + colors * alpha_mask
 
   def post_update(self, frame):
+    """
+    Update various states after processing a frame, including displaying the frame.
+    """
     self.update_text(self.text)
     self.add_overlay(frame)
     self.display_frame(frame)
     self.update_timer()
 
   def post_detection(self, frame, failed=False):
+    """
+    Update various states after recognizing a face in a frame and stop the recording.
+    """
     if self.frame_count == 0:
       self.logger.info(f"Subject{' failed to ' if failed else ' '}identified, stopping camera feed.")
     self.post_update(frame)
@@ -298,6 +415,9 @@ class UIManager:
       self.toggle_recording()
 
   def update_frame(self):
+    """
+    Main loop for frame processing.
+    """
     self.take_img_button["state"] = "disabled"
     ret, frame = self.cap.read()
     if not ret:
@@ -313,6 +433,9 @@ class UIManager:
     self.process_frame(frame)
 
   def process_frame(self, frame):
+    """
+    Processes a frame for face recognition.
+    """
     self.text = "Align your face"
     img = frame.copy()
     faces = self.detect_faces(img)
@@ -328,6 +451,7 @@ class UIManager:
       self.post_update(frame)
       return
 
+    # Adding a new user
     if not self.is_detecting:
       self.take_img_button["state"] = "normal"
       self.put_bbox(frame, face)
@@ -339,6 +463,9 @@ class UIManager:
     self.recognize_and_record(frame, face)
 
   def recognize_and_record(self, frame, face):
+    """
+    Recognizes user and records attendance.
+    """
     img = frame.copy()
     self.text = "Recognizing face..."
     self.put_bbox(frame, face)
