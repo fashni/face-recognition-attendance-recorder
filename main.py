@@ -237,7 +237,7 @@ class UIManager:
     """
     Updates the date and time display on the GUI.
     """
-    self.date_time.config(text=f"{datetime.now():%d-%B-%Y  |  %H:%M:%S}")
+    self.date_time.config(text=f"{datetime.now():%d %B %Y  |  %H:%M:%S}")
     self.root.after(1000, self.update_date_time)
 
   def toggle_recording(self):
