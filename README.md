@@ -17,6 +17,12 @@ python main.py [-w WEIGHT] [-t THRESHOLD] [-b BUFFER-SIZE] [-v]
 - `-b`, `--min-buffer-size`: Minimum buffer size for face recognition (default is `10`).
 - `-v`, `--verbose`: Show verbose command line output.
 
+### Example
+
+```sh
+python attendance_recorder.py -w siamese_weights.h5 -t 0.6 -b 10 -v
+```
+
 ## Directory Structure
 
 ```
@@ -29,12 +35,16 @@ python main.py [-w WEIGHT] [-t THRESHOLD] [-b BUFFER-SIZE] [-v]
 │   ├── known_faces
 │   │   └── person1.jpg
 │   └── weights
-│       └── model.h5
+│       └── siamese_weight.h5
 ├── main.py
 ├── requirements.txt
 ├── siamese_network.py
 └── utils.py
 ```
+- `data/weights`: Directory for storing the pre-trained weights.
+- `data/records`: Directory for storing attendance records.
+- `data/known_faces`: Directory for storing images of known faces.
+- `data/assets`: Directory for storing GUI assets.
 
 ## Acknowledgements
 
