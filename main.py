@@ -212,7 +212,7 @@ class AttendanceApp:
       messagebox.showerror("Error", "This name already exists. Please enter a different name.")
 
     face_path = self.known_dir / f"{name}.jpg"
-    cv2.imwrite(str(face_path), image)
+    cv2.imwrite(str(face_path), image, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
     self.known_people.append(image)
     self.labels.append(name)
     self.nb_known_people += 1
