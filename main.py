@@ -2,7 +2,7 @@ import argparse
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, simpledialog, ttk
 
 import cv2
 import numpy as np
@@ -22,27 +22,76 @@ class AttendanceApp:
 
   def __init__(self, root, args):
     self.logger = setup_logger(10 if args.verbose else 30)
-    self.setup_gui(root)
     self.setup_backend(args)
+    self.setup_gui(root)
 
   def setup_gui(self, root):
     self.root = root
     self.root.title("Attendance Recorder")
-    self.root.geometry("700x600")
+    self.root.geometry("900x640")
+    self.root.minsize(width=900, height=640)
 
-    self.left_frame = ttk.Frame(root, height=720)
-    self.left_frame.grid(row=0, column=0, padx=0, pady=0)
+    self.date_time = ttk.Label(root, font=("", 14), background='#333', foreground='#ffa500', anchor='center')
+    self.date_time.pack(pady=5, fill='x')
+    self.update_date_time()
 
-    self.video_label = ttk.Label(root)
-    self.video_label.grid(row=0, column=1, padx=0, pady=0, sticky='')
+    self.main_frame = ttk.Frame(root)
+    self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-    self.start_button = ttk.Button(self.left_frame, text="Start Recording", command=self.start_recording)
-    self.start_button.grid(row=0, column=0, padx=0, pady=0)
+    self.status_bar = ttk.Label(root, text=f"Registered Users: {self.nb_known_people}", relief=tk.SUNKEN, anchor='w')
+    self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-    self.stop_button = ttk.Button(self.left_frame, text="Stop Recording", command=self.stop_recording)
-    self.stop_button.grid(row=1, column=0, padx=0, pady=0)
+    self.setup_left_frame()
+    self.setup_right_frame()
+
+  def setup_left_frame(self):
+    self.left_frame = ttk.Frame(self.main_frame)
+    self.left_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
+    self.record_button = ttk.Button(self.left_frame, text="Take Attendance", command=self.toggle_recording)
+    self.record_button.pack(pady=5)
+    self.is_recording = False
+
+    self.register_button = ttk.Button(self.left_frame, text="Add New User", command=self.toggle_new_user)
+    self.register_button.pack(pady=5)
+
+    self.db_frame = ttk.Frame(self.left_frame)
+    self.db_frame.pack(pady=5, fill="both", expand=True)
+
+    self.db_tree = ttk.Treeview(self.db_frame, columns=list(self.attendance_df), show="headings")
+    for i, col in enumerate(list(self.attendance_df)):
+      self.db_tree.heading(col, text=col)
+      self.db_tree.column(col, width=(i+1)*100)
+    self.db_tree.pack(side="left", fill="both", expand=True)
+
+    for row in self.attendance_df.to_numpy().tolist():
+      self.db_tree.insert("", "end", values=row)
+
+    self.db_scrollbar = ttk.Scrollbar(self.db_frame, orient=tk.VERTICAL, command=self.db_tree.yview)
+    self.db_scrollbar.pack(side="right", fill="y")
+    self.db_tree.configure(yscrollcommand=self.db_scrollbar.set)
+
+    self.quit_button = ttk.Button(self.left_frame, text="Quit", command=self.root.quit)
+    self.quit_button.pack(pady=5)
+
+  def setup_right_frame(self):
+    self.right_frame = ttk.Frame(self.main_frame)
+    self.right_frame.grid(row=0, column=1, padx=10, pady=0, sticky="nsew")
+
+    self.video_label = ttk.Label(self.right_frame)
+    self.video_label.pack(expand=True, fill="both")
+
+    self.text_label = ttk.Label(self.right_frame, anchor="center", font=("", 14))
+    self.text_label.pack(side="left", expand=True, fill="x")
+
+    self.take_img_button = ttk.Button(self.right_frame, text="Take Image", command=self.take_image)
+    self.take_img_button["state"] = "disabled"
 
     self.display_frame(np.zeros((720, 720, 3)).astype(np.uint8))
+
+  def update_date_time(self):
+    self.date_time.config(text=f"{datetime.now():%d-%B-%Y  |  %H:%M:%S}")
+    self.root.after(1000, self.update_date_time)
 
   def setup_backend(self, args):
     self.cap = None
@@ -95,8 +144,39 @@ class AttendanceApp:
       self.attendance_df = pd.DataFrame(columns=['name', 'timestamp'])
       self.logger.info("Created a new db for the day")
 
+  def toggle_recording(self):
+    if self.nb_known_people == 0:
+      messagebox.showerror("Error", "No registered users found. Please register at least one user before starting taking attendance.")
+      return
+
+    self.is_detecting = True
+    if self.is_recording:
+      self.stop_recording()
+      self.record_button.config(text="Take Attendance")
+      self.register_button["state"] = "normal"
+    else:
+      self.start_recording()
+      self.record_button.config(text="Stop")
+      self.register_button["state"] = "disabled"
+    self.is_recording = not self.is_recording
+
+  def toggle_new_user(self):
+    self.is_detecting = False
+    if self.is_recording:
+      self.stop_recording()
+      self.register_button.config(text="Add New User")
+      self.record_button["state"] = "normal"
+      self.take_img_button.pack_forget()
+    else:
+      self.start_recording()
+      self.register_button.config(text="Stop")
+      self.record_button["state"] = "disabled"
+      self.take_img_button.pack(side="right")
+    self.is_recording = not self.is_recording
+
   def start_recording(self):
     self.prediction_buffer = []
+    self.image = None
     self.is_detected = False
     self.is_failed = False
     self.text = ""
@@ -117,6 +197,28 @@ class AttendanceApp:
     if self.cap is not None:
       self.cap.release()
     self.display_frame(np.zeros((720, 720, 3)).astype(np.uint8))
+    self.update_text("")
+
+  def take_image(self):
+    self.toggle_new_user()
+    image = self.image.copy()
+    while True:
+      name = simpledialog.askstring("Input", "Enter your name:")
+      if name is None:
+        self.logger.info(f"Name input was cancelled")
+        return
+      if name not in self.labels:
+        break
+      messagebox.showerror("Error", "This name already exists. Please enter a different name.")
+
+    face_path = self.known_dir / f"{name}.jpg"
+    cv2.imwrite(str(face_path), image)
+    self.known_people.append(image)
+    self.labels.append(name)
+    self.nb_known_people += 1
+    self.logger.info(f"New user saved, {str(face_path)}")
+    self.status_bar.config(text=f"Registered Users: {self.nb_known_people}")
+    messagebox.showinfo("Success", f"New face for {name} successfully recorded.")
 
   def get_input(self, image):
     return [self.known_people, [image]*len(self.known_people)]
@@ -125,7 +227,7 @@ class AttendanceApp:
     self.timer = self.root.after(30, self.update_frame)
 
   def display_frame(self, frame):
-    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).resize((600, 600))
+    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).resize((500, 500))
     imgtk = ImageTk.PhotoImage(image=image)
     self.video_label.imgtk = imgtk
     self.video_label.config(image=imgtk)
@@ -153,9 +255,8 @@ class AttendanceApp:
     x, y, w, h = face
     cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 1)
 
-  def update_text(self, frame, text):
-    textsize = cv2.getTextSize(text, self.font, 0.7, 2)[0]
-    cv2.putText(frame, text, (self.width//2 - (textsize[0]//2), self.height - self.height//60), self.font, 0.7, (36, 255, 12), 2)
+  def update_text(self, text):
+    self.text_label.config(text=text)
 
   def add_overlay(self, frame):
     overlay = cv2.resize(self.overlay, (self.height, self.width))
@@ -165,7 +266,7 @@ class AttendanceApp:
     frame[:] = frame[:]*(1 - alpha_mask) + colors*alpha_mask
 
   def post_update(self, frame):
-    self.update_text(frame, self.text)
+    self.update_text(self.text)
     self.add_overlay(frame)
     self.display_frame(frame)
     self.update_timer()
@@ -176,9 +277,10 @@ class AttendanceApp:
     self.post_update(frame)
     self.frame_count += 1
     if self.frame_count > 10:
-      self.stop_recording()
+      self.toggle_recording()
 
   def update_frame(self):
+    self.take_img_button["state"] = "disabled"
     ret, frame = self.cap.read()
     if not ret:
       self.update_timer()
@@ -204,13 +306,24 @@ class AttendanceApp:
     face_iou = iou(self.detection_box, face)
     self.text = "Align your face properly"
     self.logger.info(f"IoU: {face_iou:.4f}")
-    if face_iou < 0.7:
+    if face_iou < 0.65:
       self.post_update(frame)
       return
 
+    if not self.is_detecting:
+      self.take_img_button["state"] = "normal"
+      self.put_bbox(frame, face)
+      self.text = "Press Take Image button"
+      self.post_update(frame)
+      self.image = img
+      return
+
+    self.recognize_and_record(frame, face)
+
+  def recognize_and_record(self, frame, face):
+    img = frame.copy()
     self.text = "Recognizing face..."
     self.put_bbox(frame, face)
-
     confidence, label = self.recognize_face(img)
     self.prediction_buffer.append((confidence, label))
     self.logger.info(f"Buffer size: {len(self.prediction_buffer)}")
@@ -233,11 +346,15 @@ class AttendanceApp:
       self.text = f"Welcome {name}. Your attendance has been recorded"
 
     self.logger.info(f"Label: {name}, Confidence: {avg_confidence:.4f}")
+    self.logger.debug(f"{self.prediction_buffer}")
+    self.logger.debug(f"{self.labels}")
     self.post_update(frame)
 
   def record_attendance(self, name):
     new_record = {'name': name, 'timestamp': pd.Timestamp.now()}
     self.attendance_df.loc[len(self.attendance_df)] = new_record
+
+    self.db_tree.insert("", "end", values=list(new_record.values()))
     self.attendance_df.to_csv(self.db_file, index=False)
     self.logger.info("New record saved")
 
@@ -247,7 +364,7 @@ def main():
   parser.add_argument("-w", "--weight", type=str, default="", help="Filename of the weight file to be used for the Siamese network. This file must be placed inside the 'data/weights' directory. If not specified, the first '.h5' file found in the directory will be used.")
   parser.add_argument("-t", "--threshold", type=float, default=0.5, help="Threshold for face recognition confidence. If the recognition confidence exceeds this threshold, the face is considered recognized. Default value is 0.5.")
   parser.add_argument("-b", "--min-buffer-size", type=int, default=5, help="Minimum buffer size for face recognition. Default value is 10.")
-  parser.add_argument("-v", "--verbose", action="store_true", help="Verbose command line output.")
+  parser.add_argument("-v", "--verbose", action="store_true", help="Show verbose command line output.")
   args = parser.parse_args()
 
   root = tk.Tk()

@@ -9,11 +9,13 @@ pip install -r requirements.txt
 
 Run the application using the following command:
 ```sh
-python main.py [-w WEIGHT] [-t THRESHOLD]
+python main.py [-w WEIGHT] [-t THRESHOLD] [-b BUFFER-SIZE] [-v]
 ```
 
 - `-w`, `--weight`: Filename of the weight file for the Siamese network (default is the first `.h5` file in `data/weights`).
 - `-t`, `--threshold`: Threshold for face recognition confidence (default is `0.5`).
+- `-b`, `--min-buffer-size`: Minimum buffer size for face recognition (default is `10`).
+- `-v`, `--verbose`: Show verbose command line output.
 
 ## Directory Structure
 
