@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import cv2
 import numpy as np
+
 
 def iou(boxA, boxB):
   boxes = np.vstack([boxA, boxB])
@@ -33,3 +36,14 @@ def setup_logger(logging_level):
   ch.setFormatter(formatter)
   logger.addHandler(ch)
   return logger
+
+def get_weight_file(weight_fn, logger):
+  weight_dir = Path('data/weights')
+  if weight_fn:
+    weight_file = weight_dir / weight_fn
+  else:
+    weight_file = next(weight_dir.glob("*.h5"), None)
+  if not weight_file or not weight_file.exists():
+    logger.error("No valid weight file found.")
+    exit(1)
+  return weight_file

@@ -24,14 +24,16 @@ python main.py [-w WEIGHT] [-t THRESHOLD] [-b BUFFER-SIZE] [-v]
 ├── data
 │   ├── assets
 │   │   └── overlay.png
-│   ├── attendance
+│   ├── records
+│   │   └── today.csv
 │   ├── known_faces
 │   │   └── person1.jpg
 │   └── weights
 │       └── model.h5
 ├── main.py
 ├── requirements.txt
-└── siamese_network.py
+├── siamese_network.py
+└── utils.py
 ```
 
 ## Acknowledgements

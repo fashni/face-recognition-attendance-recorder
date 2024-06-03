@@ -161,6 +161,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-data/attendance/*.csv
+data/records/*.csv
 data/known_faces/*.jpg
 data/weights/*.h5
