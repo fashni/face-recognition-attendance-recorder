@@ -502,7 +502,7 @@ def main():
   parser = argparse.ArgumentParser(description="Attendance Recorder using Face Recognition.")
   parser.add_argument("-w", "--weight", type=str, default="", help="Filename of the weight file to be used for the Siamese network. This file must be placed inside the 'data/weights' directory. If not specified, the first '.h5' file found in the directory will be used.")
   parser.add_argument("-t", "--threshold", type=float, default=0.5, help="Threshold for face recognition confidence. If the recognition confidence exceeds this threshold, the face is considered recognized. Default value is 0.5.")
-  parser.add_argument("-b", "--min-buffer-size", type=int, default=5, help="Minimum buffer size for face recognition. Default value is 10.")
+  parser.add_argument("-b", "--min-buffer-size", type=int, default=5, help="Minimum buffer size for face recognition. Default value is 5.")
   parser.add_argument("-v", "--verbose", action="store_true", help="Show verbose command line output.")
   args = parser.parse_args()
 
