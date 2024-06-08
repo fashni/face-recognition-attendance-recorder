@@ -164,3 +164,4 @@ cython_debug/
 data/records/*.csv
 data/known_faces/*.jpg
 data/weights/*.h5
+data/weights/*/*.onnx

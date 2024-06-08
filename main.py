@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageTk
 
-from siamese_network import Siamese
-from utils import get_weight_file, iou, load_known_faces, setup_logger
+from siamese_network_onnx import Siamese
+from utils import get_weight_dir, iou, load_known_faces, setup_logger
 
 
 class FaceRecognizer:
@@ -30,8 +30,7 @@ class FaceRecognizer:
     self.logger = logger
     self.threshold = threshold
     self.nb_known_faces = 0
-    self.face_recognizer = Siamese()
-    self.face_recognizer.set_weight(weight_path)
+    self.face_recognizer = Siamese(weight_path)
     self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt.xml")
     self.labels = labels
     self.known_embeddings = self.get_known_embedding(known_faces)
@@ -517,7 +516,7 @@ def main():
   root = tk.Tk()
   logger = setup_logger(10 if args.verbose else 20)
 
-  weight_file = get_weight_file(args.weight, logger)
+  weight_file = get_weight_dir(args.weight, logger)
   known_imgs, labels = load_known_faces(Path("data/known_faces"), preprocess=True)
   db_manager = DatabaseManager(records_dir=Path("data/records"), logger=logger)
   face_recognizer = FaceRecognizer(weight_path=weight_file, threshold=args.threshold, known_faces=known_imgs, labels=labels, logger=logger)

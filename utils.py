@@ -97,6 +97,20 @@ def get_weight_file(weight_fn, logger):
     separate_weights(weight_file)
   return weight_file
 
+def get_weight_dir(weight_dir, logger):
+  root_dir = Path('data/weights')
+  include_files = ["single_net.onnx", "similarity_net.onnx"]
+  if weight_dir:
+    return root_dir / weight_dir
+  for item in root_dir.iterdir():
+    if not item.is_dir():
+      continue
+    files = [f for f in item.iterdir() if f.name in include_files]
+    if len(files) == len(include_files):
+      return item
+  logger.error("No valid weight directory found.")
+  exit(1)
+
 def separate_weights(weight_path):
   from siamese_network import SiameseNetwork
   weight_dir = weight_path.parent

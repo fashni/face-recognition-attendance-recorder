@@ -4,3 +4,7 @@ opencv-python
 pillow
 scikit-learn
 tensorflow
+tf2onnx
+onnxruntime
+onnxruntime-directml
+onnxruntime-gpu
