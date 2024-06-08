@@ -2,25 +2,36 @@
 
 ## Usage
 
-Install the requirements:
+### Install the requirements:
 ```sh
 pip install -r requirements.txt
 ```
 
-Run the application using the following command:
+### Split the weights file
+Split the weights file into the CNN weights and the Similarity Score weights, then convert it (optional).
 ```sh
-python main.py [-w WEIGHT] [-t THRESHOLD] [-b BUFFER-SIZE] [-v]
+python convert_model.py [WEIGHT] [-f FORMATS]
 ```
 
-- `-w`, `--weight`: Filename of the weight file for the Siamese network (default is the first `.h5` file in `data/weights`).
+- `weight`: File name of the `.h5` weights of the Siamese Network. Must be placed inside the `data/weights` directory.
+- `-f`, `--formats`: Specify the output formats. Valid formats: `['onnx', 'h5']` Default to all valid formats.
+
+### Run
+Run the application using the following command:
+```sh
+python main.py [-r RUNTIME] [-w WEIGHT] [-t THRESHOLD] [-b BUFFER-SIZE] [-v]
+```
+
+- `-r`, `--runtime`: Inference runtime to use. Valid runtime: `['onnx', 'tf']` (default is `onnx`).
+- `-w`, `--weight`: Directory containing the weight files for the Siamese network (default is the first directory in `data/weights` containing all valid weights).
 - `-t`, `--threshold`: Threshold for face recognition confidence (default is `0.5`).
 - `-b`, `--min-buffer-size`: Minimum buffer size for face recognition (default is `5`).
 - `-v`, `--verbose`: Show verbose command line output.
 
-### Example
+#### Example
 
 ```sh
-python attendance_recorder.py -w siamese_weights.h5 -t 0.6 -b 10 -v
+python main.py -r onnx -w siamese_weights -t 0.6 -b 10 -v
 ```
 
 ## Directory Structure
@@ -35,7 +46,12 @@ python attendance_recorder.py -w siamese_weights.h5 -t 0.6 -b 10 -v
 │   ├── known_faces
 │   │   └── person1.jpg
 │   └── weights
-│       └── siamese_weight.h5
+│       ├── siamese.weights
+│       │   ├── cnn.onnx
+│       │   ├── cnn.weights.h5
+│       │   ├── simscore.onnx
+│       │   └── simscore.weights.h5
+│       └── siamese.weights.h5
 ├── main.py
 ├── requirements.txt
 ├── siamese_network.py

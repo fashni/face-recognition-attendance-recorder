@@ -67,52 +67,34 @@ def setup_logger(logging_level):
   logger.addHandler(ch)
   return logger
 
-def get_weight_file(weight_fn, logger):
+def get_weight_dir(weight_dir, suffix, logger):
   """
-  Retrieve the weight file for the model.
+  Retrieve and validate the directory containing weight files for the model.
 
   Parameters:
-  weight_fn (str): Filename of the weight file.
+  weight_dir (str): Directory name containing the weight files.
+  suffix (str): The suffix/format of the weight files to be used.
   logger (logging.Logger): Logger instance for logging errors.
 
   Returns:
-  Path: Path to the weight file.
+  Path: Path to the weight directory.
 
   Raises:
-  SystemExit: If no valid weight file is found.
+  SystemExit: If no valid weight directory is found.
   """
-  weight_dir = Path('data/weights')
-  exclude_patterns = ["single_net", "similarity_net"]
-  is_excluded = lambda f: any(pattern in f.name for pattern in exclude_patterns)
-  is_all_exist = lambda f: all((weight_dir / f"{pattern}.{f.name}").exists() for pattern in exclude_patterns)
-  if weight_fn:
-    weight_file = weight_dir / weight_fn
+  root_dir = Path('data/weights')
+  include_files = [f"cnn{suffix}", f"simscore{suffix}"]
+  is_all_exist = lambda d: all((d / f).exists() for f in include_files)
+  res = None
+  if weight_dir:
+    res = root_dir / weight_dir
   else:
-    weight_files = [f for f in weight_dir.glob("*.h5") if not is_excluded(f)]
-    weight_file = weight_files[0] if weight_files else None
-  if not weight_file or not weight_file.exists():
-    logger.error("No valid weight file found.")
+    dirs = [item for item in root_dir.iterdir() if item.is_dir() and is_all_exist(item)]
+    res = dirs[0] if dirs else None
+  if res is None or not res.exists():
+    logger.error("No valid weight directory found.")
     exit(1)
-  if not is_all_exist(weight_file):
-    separate_weights(weight_file)
-  return weight_file
-
-def separate_weights(weight_path):
-  from siamese_network import SiameseNetwork
-  weight_dir = weight_path.parent
-  weight_name = weight_path.name
-
-  net =  SiameseNetwork()
-  siamese_net = net.get_siamese_net()
-  single_net = net.get_single_branch_model((105,105,1))
-  similarity_net = net.get_similarity_model((single_net.output_shape[1],))
-
-  siamese_net.load_weights(weight_path)
-  single_net.set_weights(siamese_net.get_layer(index=2).get_weights())
-  similarity_net.set_weights(siamese_net.get_layer(index=-1).get_weights())
-
-  single_net.save_weights(weight_dir / f"single_net.{weight_name}")
-  similarity_net.save_weights(weight_dir / f"similarity_net.{weight_name}")
+  return res
 
 def preprocess_images(imgs, width=105, height=105, channel=1):
   if isinstance(imgs, np.ndarray) and len(imgs.shape) == 3:

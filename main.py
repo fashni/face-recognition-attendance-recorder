@@ -9,15 +9,14 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageTk
 
-from siamese_network import Siamese
-from utils import get_weight_file, iou, load_known_faces, setup_logger
+from utils import get_weight_dir, iou, load_known_faces, setup_logger
 
 
 class FaceRecognizer:
   """
   A class for recognizing faces in images using a pre-trained Siamese network.
   """
-  def __init__(self, weight_path, threshold, known_faces, labels, logger):
+  def __init__(self, infer_rt, weight_path, threshold, known_faces, labels, logger):
     """
     Initializes the FaceRecognizer with a given weight path, threshold, and logger.
 
@@ -30,8 +29,7 @@ class FaceRecognizer:
     self.logger = logger
     self.threshold = threshold
     self.nb_known_faces = 0
-    self.face_recognizer = Siamese()
-    self.face_recognizer.set_weight(weight_path)
+    self.face_recognizer = infer_rt(weight_path)
     self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt.xml")
     self.labels = labels
     self.known_embeddings = self.get_known_embedding(known_faces)
@@ -507,22 +505,35 @@ class UIManager:
 
 
 def main():
+  VALID_RT = ["onnx", "tf"]
   parser = argparse.ArgumentParser(description="Attendance Recorder using Face Recognition.")
-  parser.add_argument("-w", "--weight", type=str, default="", help="Filename of the weight file to be used for the Siamese network. This file must be placed inside the 'data/weights' directory. If not specified, the first '.h5' file found in the directory will be used.")
+  parser.add_argument("-r", "--runtime", type=str, default="onnx", help=f"Inference runtime to use. Valid runtime: {VALID_RT}. Default value is 'onnx'.")
+  parser.add_argument("-w", "--weight", type=str, default="", help="Directory name containing the weight files. The directory must be placed inside the 'data/weights' directory. Default to the first directory containing all valid weight files.")
   parser.add_argument("-t", "--threshold", type=float, default=0.5, help="Threshold for face recognition confidence. If the recognition confidence exceeds this threshold, the face is considered recognized. Default value is 0.5.")
   parser.add_argument("-b", "--min-buffer-size", type=int, default=5, help="Minimum buffer size for face recognition. Default value is 5.")
   parser.add_argument("-v", "--verbose", action="store_true", help="Show verbose command line output.")
   args = parser.parse_args()
 
-  root = tk.Tk()
   logger = setup_logger(10 if args.verbose else 20)
+  if args.runtime not in VALID_RT:
+    logger.error("Invalid runtime")
+    return
+  
+  if args.runtime == "onnx":
+    from inference_runtime import SiameseONNX as InferRT
+    suffix = ".onnx"
+  elif args.runtime == "tf":
+    from inference_runtime import SiameseTF as InferRT
+    suffix = ".weights.h5"
+  logger.info(f"Using {args.runtime} as the inference runtime.")
 
-  weight_file = get_weight_file(args.weight, logger)
+  weight_file = get_weight_dir(args.weight, suffix, logger)
   known_imgs, labels = load_known_faces(Path("data/known_faces"), preprocess=True)
   db_manager = DatabaseManager(records_dir=Path("data/records"), logger=logger)
-  face_recognizer = FaceRecognizer(weight_path=weight_file, threshold=args.threshold, known_faces=known_imgs, labels=labels, logger=logger)
-  ui_manager = UIManager(root, face_recognizer, db_manager, logger, args.min_buffer_size)
+  face_recognizer = FaceRecognizer(infer_rt=InferRT, weight_path=weight_file, threshold=args.threshold, known_faces=known_imgs, labels=labels, logger=logger)
 
+  root = tk.Tk()
+  ui_manager = UIManager(root, face_recognizer, db_manager, logger, args.min_buffer_size)
   root.mainloop()
 
 
