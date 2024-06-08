@@ -17,34 +17,46 @@ class FaceRecognizer:
   """
   A class for recognizing faces in images using a pre-trained Siamese network.
   """
-  def __init__(self, weight_path, threshold, logger):
+  def __init__(self, weight_path, threshold, known_faces, labels, logger):
     """
     Initializes the FaceRecognizer with a given weight path, threshold, and logger.
 
     Args:
         weight_path (str): Path to the pre-trained weights for the Siamese network.
         threshold (float): Threshold for face recognition confidence.
+        known_faces (list[numpy.ndarray]): List of known faces to compare against.
         logger (Logger): Logger object for logging information.
     """
     self.logger = logger
     self.threshold = threshold
+    self.nb_known_faces = 0
     self.face_recognizer = Siamese()
     self.face_recognizer.set_weight(weight_path)
     self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt.xml")
+    self.labels = labels
+    self.known_embeddings = self.get_known_embedding(known_faces)
 
-  def recognize_face(self, known_faces, frame):
+  def get_known_embedding(self, imgs, preprocess=False):
+    self.nb_known_faces = len(imgs)
+    return self.face_recognizer.get_embedding(imgs, batch_size=min(self.nb_known_faces, 32), preprocess=preprocess)
+
+  def add_embedding(self, image, label, preprocess=True):
+    embedding = self.face_recognizer.get_embedding(image, preprocess=preprocess)
+    self.known_embeddings = np.vstack([self.known_embeddings, embedding])
+    self.labels.append(label)
+    self.nb_known_faces += 1
+
+  def recognize_face(self, frame):
     """
     Recognizes faces in a given frame and compares them with known faces.
 
     Args:
-        known_faces (list): List of known faces to compare against.
         frame (numpy.ndarray): The frame in which to recognize faces.
 
     Returns:
         tuple: A tuple containing the maximum confidence score and the label of the recognized face.
     """
-    inputs = [known_faces, [frame] * len(known_faces)]
-    result = self.face_recognizer.predict(inputs, preprocess=True, batch_size=min(len(known_faces), 8))
+    result = self.face_recognizer.predict(frame, self.known_embeddings, preprocess=True)
     confidence, label = result.max(), result.argmax()
     return confidence, label
 
@@ -53,7 +65,7 @@ class DatabaseManager:
   """
   A class for managing a database of attendance records.
   """
-  def __init__(self, records_dir, known_dir, logger):
+  def __init__(self, records_dir, logger):
     """
     Initializes the DatabaseManager with directories for records and known faces, and a logger.
 
@@ -64,10 +76,7 @@ class DatabaseManager:
     """
     self.logger = logger
     self.records_dir = records_dir
-    self.known_dir = known_dir
     self.load_database()
-    self.known_people, self.labels = load_known_faces(known_dir)
-    self.nb_known_people = len(self.known_people)
 
   def load_database(self):
     """
@@ -96,6 +105,7 @@ class DatabaseManager:
 
 class UIManager:
   ASSETS_DIR = Path("data/assets")
+  KNOWN_DIR = Path("data/known_faces")
   def __init__(self, root, face_recognizer, db_manager, logger, min_buffer_size=5):
     """
     Initializes the UIManager with the root window, face recognizer, database manager, logger, and buffer sizes.
@@ -130,7 +140,7 @@ class UIManager:
     self.main_frame = ttk.Frame(self.root)
     self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-    self.status_bar = ttk.Label(self.root, text=f"Registered Users: {self.db_manager.nb_known_people}", relief=tk.SUNKEN, anchor='w')
+    self.status_bar = ttk.Label(self.root, text=f"Registered Users: {self.face_recognizer.nb_known_faces}", relief=tk.SUNKEN, anchor='w')
     self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
     self.setup_left_frame()
@@ -244,7 +254,7 @@ class UIManager:
     """
     Toggles the recording state for taking attendance.
     """
-    if self.db_manager.nb_known_people == 0:
+    if self.face_recognizer.nb_known_faces == 0:
       messagebox.showerror("Error", "No registered users found. Please register at least one user before starting taking attendance.")
       return
 
@@ -294,7 +304,7 @@ class UIManager:
     self.width = self.height = self.frame_height
     self.detection_box = (self.width // np.array([3.6, 14.4, 2.33, 1.8])).astype(int)  # xywh
     self.update_timer()
-    self.logger.info(f"fw: {self.frame_width}, fh: {self.frame_height}")
+    self.logger.debug(f"fw: {self.frame_width}, fh: {self.frame_height}")
 
   def stop_recording(self):
     """
@@ -318,17 +328,15 @@ class UIManager:
       if name is None:
         self.logger.info("Name input was cancelled")
         return
-      if name not in self.db_manager.labels:
+      if name not in self.face_recognizer.labels:
         break
       messagebox.showerror("Error", "This name already exists. Please enter a different name.")
 
-    face_path = self.db_manager.known_dir / f"{name}.jpg"
+    face_path = self.KNOWN_DIR / f"{name}.jpg"
     cv2.imwrite(str(face_path), image, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
-    self.db_manager.known_people.append(image)
-    self.db_manager.labels.append(name)
-    self.db_manager.nb_known_people += 1
+    self.face_recognizer.add_embedding(image, name)
     self.logger.info(f"New user saved, {str(face_path)}")
-    self.status_bar.config(text=f"Registered Users: {self.db_manager.nb_known_people}")
+    self.status_bar.config(text=f"Registered Users: {self.face_recognizer.nb_known_faces}")
     messagebox.showinfo("Success", f"New face for {name} successfully recorded.")
 
   def update_timer(self):
@@ -358,7 +366,7 @@ class UIManager:
     """
     Recognizes faces in a frame.
     """
-    return self.face_recognizer.recognize_face(self.db_manager.known_people, frame)
+    return self.face_recognizer.recognize_face(frame)
 
   def smooth_predictions(self):
     """
@@ -446,7 +454,7 @@ class UIManager:
     face = faces[0]
     face_iou = iou(self.detection_box, face)
     self.text = "Align your face properly"
-    self.logger.info(f"IoU: {face_iou:.4f}")
+    self.logger.debug(f"IoU: {face_iou:.4f}")
     if face_iou < 0.65:
       self.post_update(frame)
       return
@@ -471,7 +479,7 @@ class UIManager:
     self.put_bbox(frame, face)
     confidence, label = self.recognize_face(img)
     self.prediction_buffer.append((confidence, label))
-    self.logger.info(f"Buffer size: {len(self.prediction_buffer)}")
+    self.logger.debug(f"Buffer size: {len(self.prediction_buffer)}")
     if len(self.prediction_buffer) < self.min_buffer_size:
       self.post_update(frame)
       return
@@ -484,7 +492,7 @@ class UIManager:
       return
 
     avg_confidence, most_common_label = self.smooth_predictions()
-    name = self.db_manager.labels[most_common_label]
+    name = self.face_recognizer.labels[most_common_label]
     if avg_confidence > self.face_recognizer.threshold:
       self.is_detected = True
       new_record = {'name': name, 'timestamp': pd.Timestamp.now()}
@@ -494,7 +502,7 @@ class UIManager:
 
     self.logger.info(f"Label: {name}, Confidence: {avg_confidence:.4f}")
     self.logger.debug(f"{self.prediction_buffer}")
-    self.logger.debug(f"{self.db_manager.labels}")
+    self.logger.debug(f"{self.face_recognizer.labels}")
     self.post_update(frame)
 
 
@@ -507,11 +515,12 @@ def main():
   args = parser.parse_args()
 
   root = tk.Tk()
-  logger = setup_logger(10 if args.verbose else 30)
+  logger = setup_logger(10 if args.verbose else 20)
 
   weight_file = get_weight_file(args.weight, logger)
-  face_recognizer = FaceRecognizer(weight_path=weight_file, threshold=args.threshold, logger=logger)
-  db_manager = DatabaseManager(records_dir=Path('data/records'), known_dir=Path('data/known_faces'), logger=logger)
+  known_imgs, labels = load_known_faces(Path("data/known_faces"), preprocess=True)
+  db_manager = DatabaseManager(records_dir=Path("data/records"), logger=logger)
+  face_recognizer = FaceRecognizer(weight_path=weight_file, threshold=args.threshold, known_faces=known_imgs, labels=labels, logger=logger)
   ui_manager = UIManager(root, face_recognizer, db_manager, logger, args.min_buffer_size)
 
   root.mainloop()

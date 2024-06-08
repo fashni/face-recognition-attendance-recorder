@@ -24,7 +24,7 @@ def iou(boxA, boxB):
   boxes_area = (boxes[:, 2]-boxes[:, 0]+1) * (boxes[:, 3]-boxes[:, 1]+1)
   return inter_area / (boxes_area.sum() - inter_area)
 
-def load_known_faces(known_dir):
+def load_known_faces(known_dir, preprocess=True):
   """
   Load known face images from a directory.
 
@@ -43,6 +43,8 @@ def load_known_faces(known_dir):
       continue
     labels.append(".".join(person_file.name.split('.')[:-1]))
     known_ppl.append(cv2.imread(str(person_file)))
+  if preprocess:
+    known_ppl = preprocess_images(known_ppl)
   return known_ppl, labels
 
 def setup_logger(logging_level):
@@ -80,11 +82,44 @@ def get_weight_file(weight_fn, logger):
   SystemExit: If no valid weight file is found.
   """
   weight_dir = Path('data/weights')
+  exclude_patterns = ["single_net", "similarity_net"]
+  is_excluded = lambda f: any(pattern in f.name for pattern in exclude_patterns)
+  is_all_exist = lambda f: all((weight_dir / f"{pattern}.{f.name}").exists() for pattern in exclude_patterns)
   if weight_fn:
     weight_file = weight_dir / weight_fn
   else:
-    weight_file = next(weight_dir.glob("*.h5"), None)
+    weight_files = [f for f in weight_dir.glob("*.h5") if not is_excluded(f)]
+    weight_file = weight_files[0] if weight_files else None
   if not weight_file or not weight_file.exists():
     logger.error("No valid weight file found.")
     exit(1)
+  if not is_all_exist(weight_file):
+    separate_weights(weight_file)
   return weight_file
+
+def separate_weights(weight_path):
+  from siamese_network import SiameseNetwork
+  weight_dir = weight_path.parent
+  weight_name = weight_path.name
+
+  net =  SiameseNetwork()
+  siamese_net = net.get_siamese_net()
+  single_net = net.get_single_branch_model((105,105,1))
+  similarity_net = net.get_similarity_model((single_net.output_shape[1],))
+
+  siamese_net.load_weights(weight_path)
+  single_net.set_weights(siamese_net.get_layer(index=2).get_weights())
+  similarity_net.set_weights(siamese_net.get_layer(index=-1).get_weights())
+
+  single_net.save_weights(weight_dir / f"single_net.{weight_name}")
+  similarity_net.save_weights(weight_dir / f"similarity_net.{weight_name}")
+
+def preprocess_images(imgs, width=105, height=105, channel=1):
+  if isinstance(imgs, np.ndarray) and len(imgs.shape) == 3:
+    imgs = [imgs]
+  res = []
+  for image in imgs:
+    img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    img = cv2.resize(img, (width, height))
+    res.append(img.reshape(width, height, channel).astype(np.float32))
+  return np.array(res)
